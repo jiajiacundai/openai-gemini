@@ -137,7 +137,7 @@ async function handleEmbeddings (req, apiKey) {
   return new Response(body, fixCors(response));
 }
 
-const DEFAULT_MODEL = "gemini-1.5-pro-latest";
+const DEFAULT_MODEL = "gemini-2.0-flash";
 async function handleCompletions (req, apiKey) {
   let model = DEFAULT_MODEL;
   switch(true) {
@@ -147,6 +147,7 @@ async function handleCompletions (req, apiKey) {
       model = req.model.substring(7);
       break;
     case req.model.startsWith("gemini-"):
+    case req.model.startsWith("gemma-"):
     case req.model.startsWith("learnlm-"):
       model = req.model;
   }
