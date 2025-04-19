@@ -173,7 +173,7 @@ async function handleCompletions (req, apiKey) {
 
   body = response.body;
   if (response.ok) {
-    let id = generateChatcmplId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
+    let id = "chatcmpl-" + generateId(); //"chatcmpl-8pMMaqXMK68B3nyDBrapTDrhkHBQK";
     const shared = {};
     if (req.stream) {
       body = response.body
@@ -240,15 +240,16 @@ const safetySettings = harmCategory.map(category => ({
   threshold: "BLOCK_NONE",
 }));
 const fieldsMap = {
-  stop: "stopSequences",
-  n: "candidateCount", // not for streaming
-  max_tokens: "maxOutputTokens",
-  max_completion_tokens: "maxOutputTokens",
-  temperature: "temperature",
-  top_p: "topP",
-  top_k: "topK", // non-standard
   frequency_penalty: "frequencyPenalty",
+  max_completion_tokens: "maxOutputTokens",
+  max_tokens: "maxOutputTokens",
+  n: "candidateCount", // not for streaming
   presence_penalty: "presencePenalty",
+  seed: "seed",
+  stop: "stopSequences",
+  temperature: "temperature",
+  top_k: "topK", // non-standard
+  top_p: "topP",
 };
 const transformConfig = (req) => {
   let cfg = {};
@@ -310,52 +311,67 @@ const parseImg = async (url) => {
   };
 };
 
-const transformMsg = async ({ content, tool_calls, tool_call_id }, fnames) => {
-  const parts = [];
-  if (tool_call_id !== undefined) {
-    let response;
+const transformFnResponse = ({ content, tool_call_id }, parts) => {
+  if (!parts.calls) {
+    throw new HttpError("No function calls found in the previous message", 400);
+  }
+  let response;
+  try {
+    response = JSON.parse(content);
+  } catch (err) {
+    console.error("Error parsing function response content:", err);
+    throw new HttpError("Invalid function response: " + content, 400);
+  }
+  if (typeof response !== "object" || response === null || Array.isArray(response)) {
+    response = { result: response };
+  }
+  if (!tool_call_id) {
+    throw new HttpError("tool_call_id not specified", 400);
+  }
+  const { i, name } = parts.calls[tool_call_id] ?? {};
+  if (!name) {
+    throw new HttpError("Unknown tool_call_id: " + tool_call_id, 400);
+  }
+  if (parts[i]) {
+    throw new HttpError("Duplicated tool_call_id: " + tool_call_id, 400);
+  }
+  parts[i] = {
+    functionResponse: {
+      id: tool_call_id.startsWith("call_") ? null : tool_call_id,
+      name,
+      response,
+    }
+  };
+};
+
+const transformFnCalls = ({ tool_calls }) => {
+  const calls = {};
+  const parts = tool_calls.map(({ function: { arguments: argstr, name }, id, type }, i) => {
+    if (type !== "function") {
+      throw new HttpError(`Unsupported tool_call type: "${type}"`, 400);
+    }
+    let args;
     try {
-      response = JSON.parse(content);
+      args = JSON.parse(argstr);
     } catch (err) {
-      console.error("Error parsing function response content:", err);
-      throw new HttpError("Invalid function response: " + content, 400);
+      console.error("Error parsing function arguments:", err);
+      throw new HttpError("Invalid function arguments: " + argstr, 400);
     }
-    if (typeof response !== "object" || response === null || Array.isArray(response)) {
-      response = { result: response };
-    }
-    parts.push({
-      functionResponse: {
-        id: tool_call_id.startsWith("{") ? null : tool_call_id,
-        name: fnames[tool_call_id],
-        response,
+    calls[id] = {i, name};
+    return {
+      functionCall: {
+        id: id.startsWith("call_") ? null : id,
+        name,
+        args,
       }
-    });
-    return parts;
-  }
-  if (tool_calls) {
-    for (const tcall of tool_calls) {
-      if (tcall.type !== "function") {
-        throw new HttpError(`Unsupported tool_call type: "${tcall.type}"`, 400);
-      }
-      const { function: { arguments: argstr, name }, id } = tcall;
-      let args;
-      try {
-        args = JSON.parse(argstr);
-      } catch (err) {
-        console.error("Error parsing function arguments:", err);
-        throw new HttpError("Invalid function arguments: " + argstr, 400);
-      }
-      parts.push({
-        functionCall: {
-          id: id.startsWith("{") ? null : id,
-          name,
-          args,
-        }
-      });
-      fnames[id] = name;
-    }
-    return parts;
-  }
+    };
+  });
+  parts.calls = calls;
+  return parts;
+};
+
+const transformMsg = async ({ content }) => {
+  const parts = [];
   if (!Array.isArray(content)) {
     // system, user: string
     // assistant: string or null (Required unless tool_calls is specified.)
@@ -396,31 +412,41 @@ const transformMessages = async (messages) => {
   if (!messages) { return; }
   const contents = [];
   let system_instruction;
-  const fnames = {}; // cache function names by tool_call_id between messages
   for (const item of messages) {
-    if (item.role === "system") {
-      system_instruction = { parts: await transformMsg(item) };
-    } else {
-      if (item.role === "assistant") {
-        item.role = "model";
-      } else if (item.role === "tool") {
-        const prev = contents[contents.length - 1];
-        if (prev?.role === "function") {
-          prev.parts.push(...await transformMsg(item, fnames));
-          continue;
+    switch (item.role) {
+      case "system":
+        system_instruction = { parts: await transformMsg(item) };
+        continue;
+      case "tool":
+        // eslint-disable-next-line no-case-declarations
+        let { role, parts } = contents[contents.length - 1] ?? {};
+        if (role !== "function") {
+          const calls = parts?.calls;
+          parts = []; parts.calls = calls;
+          contents.push({
+            role: "function", // ignored
+            parts
+          });
         }
-        item.role = "function"; // ignored
-      } else if (item.role !== "user") {
-        throw HttpError(`Unknown message role: "${item.role}"`, 400);
-      }
-      contents.push({
-        role: item.role,
-        parts: await transformMsg(item, fnames)
-      });
+        transformFnResponse(item, parts);
+        continue;
+      case "assistant":
+        item.role = "model";
+        break;
+      case "user":
+        break;
+      default:
+        throw new HttpError(`Unknown message role: "${item.role}"`, 400);
     }
+    contents.push({
+      role: item.role,
+      parts: item.tool_calls ? transformFnCalls(item) : await transformMsg(item)
+    });
   }
-  if (system_instruction && contents.length === 0) {
-    contents.push({ role: "model", parts: { text: " " } });
+  if (system_instruction) {
+    if (!contents[0]?.parts.some(part => part.text)) {
+      contents.unshift({ role: "user", parts: { text: " " } });
+    }
   }
   //console.info(JSON.stringify(contents, 2));
   return { system_instruction, contents };
@@ -454,10 +480,10 @@ const transformRequest = async (req) => ({
   ...transformTools(req),
 });
 
-const generateChatcmplId = () => {
+const generateId = () => {
   const characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const randomChar = () => characters[Math.floor(Math.random() * characters.length)];
-  return "chatcmpl-" + Array.from({ length: 29 }, randomChar).join("");
+  return Array.from({ length: 29 }, randomChar).join("");
 };
 
 const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse#finishreason
@@ -476,7 +502,7 @@ const transformCandidates = (key, cand) => {
       const fc = part.functionCall;
       message.tool_calls = message.tool_calls ?? [];
       message.tool_calls.push({
-        id: fc.id ?? `{${fc.name}}`,
+        id: fc.id ?? "call_" + generateId(),
         type: "function",
         function: {
           name: fc.name,
