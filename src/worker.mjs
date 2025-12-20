@@ -384,7 +384,7 @@ const transformFnResponse = ({ content, tool_call_id }, parts) => {
 
 const transformFnCalls = ({ tool_calls }) => {
   const calls = {};
-  const parts = tool_calls.map(({ function: { arguments: argstr, name }, id, type }, i) => {
+  const parts = tool_calls.map(({ function: { arguments: argstr, name }, id, type, extra_content }, i) => {
     if (type !== "function") {
       throw new HttpError(`Unsupported tool_call type: "${type}"`, 400);
     }
@@ -401,19 +401,21 @@ const transformFnCalls = ({ tool_calls }) => {
         id: id.startsWith("call_") ? null : id,
         name,
         args,
-      }
+      },
+      thoughtSignature: extra_content?.google?.thought_signature,
     };
   });
   parts.calls = calls;
   return parts;
 };
 
-const transformMsg = async ({ content }) => {
+const transformMsg = async ({ content, extra_content }) => {
+  const thoughtSignature = extra_content?.google?.thought_signature;
   const parts = [];
   if (!Array.isArray(content)) {
     // system, user: string
     // assistant: string or null (Required unless tool_calls is specified.)
-    parts.push({ text: content });
+    parts.push({ text: content, thoughtSignature });
     return parts;
   }
   // user:
@@ -438,6 +440,13 @@ const transformMsg = async ({ content }) => {
         break;
       default:
         throw new HttpError(`Unknown "content" item type: "${item.type}"`, 400);
+    }
+  }
+  if (thoughtSignature) {
+    if (parts.length === 1) {
+      parts[0].thoughtSignature = thoughtSignature;
+    } else {
+      parts.push({ text:"", thoughtSignature });
     }
   }
   if (content.every(item => item.type === "image_url")) {
@@ -535,25 +544,35 @@ const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse
 const SEP = "\n\n|>";
 const transformCandidates = (key, cand) => {
   const message = { role: "assistant", content: [] };
+  let thought_signature;
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
       message.tool_calls ??= [];
+      const thought_signature = fc.thoughtSignature;
       message.tool_calls.push({
         id: fc.id ?? "call_" + generateId(),
         type: "function",
         function: {
           name: fc.name,
           arguments: JSON.stringify(fc.args),
-        }
+        },
+        extra_content: thought_signature ? {google: { thought_signature }} : undefined,
       });
     } else if (typeof part.text === "string") {
       message.content.push(part.text);
+      if (thought_signature && part.thoughtSignature) {
+        throw new Error("Unexpected multiple thoughtSignature");
+      }
+      thought_signature = part.thoughtSignature;
     } else {
       throw new Error("Unexpected part type: " + JSON.stringify(part,2));
     }
   }
   message.content = message.content.join(SEP) ?? null;
+  if (thought_signature) {
+    message.extra_content = {google: { thought_signature }};
+  }
   return {
     index: cand.index ?? 0, // 0-index is absent in new -002 models response
     [key]: message,
