@@ -111,7 +111,7 @@ async function handleEmbeddings (req, apiKey) {
     default:
       model = DEFAULT_EMBEDDINGS_MODEL;
   }
-  modelFull = modelFull ?? "models/" + model;
+  modelFull ??= "models/" + model;
   if (!Array.isArray(req.input)) {
     req.input = [ req.input ];
   }
@@ -176,7 +176,7 @@ async function handleCompletions (req, apiKey) {
       model = model.slice(0,-7);
       // eslint-disable-next-line no-fallthrough
     case req.model?.includes("-search-preview"):
-      body.tools = body.tools ?? [];
+      body.tools ??= [];
       body.tools.push({googleSearch: {}});
   }
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
@@ -538,7 +538,7 @@ const transformCandidates = (key, cand) => {
   for (const part of cand.content?.parts ?? []) {
     if (part.functionCall) {
       const fc = part.functionCall;
-      message.tool_calls = message.tool_calls ?? [];
+      message.tool_calls ??= [];
       message.tool_calls.push({
         id: fc.id ?? "call_" + generateId(),
         type: "function",
@@ -670,7 +670,7 @@ function toOpenAiStream (line, controller) {
   }
   console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
   const cand = obj.choices[0];
-  cand.index = cand.index ?? 0; // absent in new -002 models response
+  cand.index ??= 0; // absent in new -002 models response
   const finish_reason = cand.finish_reason;
   cand.finish_reason = null;
   if (!this.last[cand.index]) { // first
