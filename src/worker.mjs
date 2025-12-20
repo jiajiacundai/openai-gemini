@@ -153,7 +153,6 @@ async function handleCompletions (req, apiKey) {
       break;
     case model.startsWith("gemini-"):
     case model.startsWith("gemma-"):
-    case model.startsWith("learnlm-"):
       break;
     default:
       model = DEFAULT_MODEL;
