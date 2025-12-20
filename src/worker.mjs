@@ -157,7 +157,8 @@ async function handleCompletions (req, apiKey) {
     default:
       model = DEFAULT_MODEL;
   }
-  let body = await transformRequest(req);
+  let isV3 = model.startsWith("gemini-3");
+  let body = await transformRequest(req, isV3);
   const extra = req.extra_body?.google;
   if (extra) {
     if (extra.safety_settings) {
@@ -268,14 +269,21 @@ const fieldsMap = {
   top_k: "topK", // non-standard
   top_p: "topP",
 };
+//https://ai.google.dev/gemini-api/docs/openai#thinking
+//https://platform.openai.com/docs/api-reference/chat/create#chat_create-reasoning_effort
 const thinkingBudgetMap = {
   none: 0,
-  //minimal: 0,
+  minimal: 1024,
   low: 1024,
   medium: 8192,
   high: 24576,
+  xhigh: 32768, // 2.5 Pro
 };
-const transformConfig = (req) => {
+const thinkingLevelMap = {
+  none: "minimal",
+  xhigh: "high",
+};
+const transformConfig = (req, isV3) => {
   let cfg = {};
   //if (typeof req.stop === "string") { req.stop = [req.stop]; } // no need
   for (let key in req) {
@@ -305,7 +313,10 @@ const transformConfig = (req) => {
     }
   }
   if (req.reasoning_effort) {
-    cfg.thinkingConfig = { thinkingBudget: thinkingBudgetMap[req.reasoning_effort] };
+    cfg.thinkingConfig =
+      isV3
+        ? { thinkingLevel: thinkingLevelMap[req.reasoning_effort] ?? req.reasoning_effort }
+        : { thinkingBudget: thinkingBudgetMap[req.reasoning_effort] };
   }
   return cfg;
 };
@@ -500,10 +511,10 @@ const transformTools = (req) => {
   return { tools, tool_config };
 };
 
-const transformRequest = async (req) => ({
+const transformRequest = async (req, isV3) => ({
   ...await transformMessages(req.messages),
   safetySettings,
-  generationConfig: transformConfig(req),
+  generationConfig: transformConfig(req,isV3),
   ...transformTools(req),
 });
 
