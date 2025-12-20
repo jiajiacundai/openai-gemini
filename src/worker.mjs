@@ -547,8 +547,10 @@ const transformCandidates = (key, cand) => {
           arguments: JSON.stringify(fc.args),
         }
       });
-    } else {
+    } else if (typeof part.text === "string") {
       message.content.push(part.text);
+    } else {
+      throw new Error("Unexpected part type: " + JSON.stringify(part,2));
     }
   }
   message.content = message.content.join(SEP) ?? null;
