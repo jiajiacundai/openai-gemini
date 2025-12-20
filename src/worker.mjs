@@ -605,7 +605,7 @@ const checkPromptBlock = (choices, promptFeedback, key) => {
 
 const processCompletionsResponse = (data, model, id) => {
   const obj = {
-    id,
+    id: data.responseId ?? id,
     choices: data.candidates.map(transformCandidatesMessage),
     created: Math.floor(Date.now()/1000),
     model: data.modelVersion ?? model,
@@ -656,7 +656,7 @@ function toOpenAiStream (line, controller) {
     return;
   }
   const obj = {
-    id: this.id,
+    id: data.responseId ?? this.id,
     choices: data.candidates.map(transformCandidatesDelta),
     //created: Math.floor(Date.now()/1000),
     model: data.modelVersion ?? this.model,
