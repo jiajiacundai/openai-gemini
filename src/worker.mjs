@@ -67,8 +67,8 @@ const handleOPTIONS = async () => {
 const BASE_URL = "https://generativelanguage.googleapis.com";
 const API_VERSION = "v1beta";
 
-// https://github.com/googleapis/js-genai/blob/main/src/_api_client.ts#L18
-const API_CLIENT = "google-genai-sdk/1.28.0"; // npm view @google/genai version
+// https://github.com/googleapis/js-genai/blob/main/src/_api_client.ts#L21
+const API_CLIENT = "google-genai-sdk/1.34.0"; // npm view @google/genai version
 const makeHeaders = (apiKey, more) => ({
   "x-goog-api-client": API_CLIENT,
   ...(apiKey && { "x-goog-api-key": apiKey }),
@@ -144,19 +144,20 @@ async function handleEmbeddings (req, apiKey) {
 
 const DEFAULT_MODEL = "gemini-flash-latest";
 async function handleCompletions (req, apiKey) {
-  let model;
+  let model = req.model;
   switch (true) {
-    case typeof req.model !== "string":
+    case typeof model !== "string":
+      throw new HttpError("model is not specified", 400);
+    case model.startsWith("models/"):
+      model = model.substring(7);
       break;
-    case req.model.startsWith("models/"):
-      model = req.model.substring(7);
+    case model.startsWith("gemini-"):
+    case model.startsWith("gemma-"):
+    case model.startsWith("learnlm-"):
       break;
-    case req.model.startsWith("gemini-"):
-    case req.model.startsWith("gemma-"):
-    case req.model.startsWith("learnlm-"):
-      model = req.model;
+    default:
+      model = DEFAULT_MODEL;
   }
-  model = model || DEFAULT_MODEL;
   let body = await transformRequest(req);
   const extra = req.extra_body?.google;
   if (extra) {
