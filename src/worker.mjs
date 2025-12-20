@@ -176,7 +176,7 @@ async function handleCompletions (req, apiKey) {
       model = model.slice(0,-7);
       // eslint-disable-next-line no-fallthrough
     case req.model?.includes("-search-preview"):
-      body.tools = body.tools || [];
+      body.tools = body.tools ?? [];
       body.tools.push({googleSearch: {}});
   }
   const TASK = req.stream ? "streamGenerateContent" : "generateContent";
@@ -551,12 +551,12 @@ const transformCandidates = (key, cand) => {
       message.content.push(part.text);
     }
   }
-  message.content = message.content.join(SEP) || null;
+  message.content = message.content.join(SEP) ?? null;
   return {
-    index: cand.index || 0, // 0-index is absent in new -002 models response
+    index: cand.index ?? 0, // 0-index is absent in new -002 models response
     [key]: message,
     logprobs: null,
-    finish_reason: message.tool_calls ? "tool_calls" : reasonsMap[cand.finishReason] || cand.finishReason,
+    finish_reason: message.tool_calls ? "tool_calls" : reasonsMap[cand.finishReason] ?? cand.finishReason,
     //original_finish_reason: cand.finishReason,
   };
 };
@@ -670,7 +670,7 @@ function toOpenAiStream (line, controller) {
   }
   console.assert(data.candidates.length === 1, "Unexpected candidates count: %d", data.candidates.length);
   const cand = obj.choices[0];
-  cand.index = cand.index || 0; // absent in new -002 models response
+  cand.index = cand.index ?? 0; // absent in new -002 models response
   const finish_reason = cand.finish_reason;
   cand.finish_reason = null;
   if (!this.last[cand.index]) { // first
