@@ -542,7 +542,7 @@ const reasonsMap = { //https://ai.google.dev/api/rest/v1/GenerateContentResponse
   //"OTHER": "OTHER",
 };
 const SEP = "\n\n|>";
-const transformCandidates = (key, cand) => {
+function transformCandidates (key, cand) {
   const message = { role: "assistant", content: [] };
   let thought_signature;
   for (const part of cand.content?.parts ?? []) {
@@ -560,6 +560,24 @@ const transformCandidates = (key, cand) => {
         extra_content: thought_signature ? {google: { thought_signature }} : undefined,
       });
     } else if (typeof part.text === "string") {
+      const len = message.content.length;
+      if (part.thought !== this.isThinking) {
+        this.isThinking = part.thought;
+        let prefix;
+        if (part.thought) {
+          prefix = "<thought>\n";
+        } else {
+          prefix = "</thought>\n\n";
+          if (len) {
+            message.content[len-1] = message.content[len-1].trimEnd() + "\n";
+          } else {
+            prefix += "\n";
+          }
+        }
+        part.text = prefix + part.text;
+      } else if (len) {
+        message.content[len-1] += SEP;
+      }
       message.content.push(part.text);
       if (thought_signature && part.thoughtSignature) {
         throw new Error("Unexpected multiple thoughtSignature");
@@ -569,7 +587,7 @@ const transformCandidates = (key, cand) => {
       throw new Error("Unexpected part type: " + JSON.stringify(part,2));
     }
   }
-  message.content = message.content.join(SEP) ?? null;
+  message.content = message.content.join("") ?? null;
   if (thought_signature) {
     message.extra_content = {google: { thought_signature }};
   }
@@ -580,9 +598,7 @@ const transformCandidates = (key, cand) => {
     finish_reason: message.tool_calls ? "tool_calls" : reasonsMap[cand.finishReason] ?? cand.finishReason,
     //original_finish_reason: cand.finishReason,
   };
-};
-const transformCandidatesMessage = transformCandidates.bind(null, "message");
-const transformCandidatesDelta = transformCandidates.bind(null, "delta");
+}
 
 const notEmpty = (el) => Object.values(el).some(Boolean) ? el : undefined;
 const sum = (...numbers) => numbers.reduce((total, num) => total + (num ?? 0), 0);
@@ -627,7 +643,7 @@ const checkPromptBlock = (choices, promptFeedback, key) => {
 const processCompletionsResponse = (data, model, id) => {
   const obj = {
     id: data.responseId ?? id,
-    choices: data.candidates.map(transformCandidatesMessage),
+    choices: data.candidates.map(transformCandidates.bind({}, "message")),
     created: Math.floor(Date.now()/1000),
     model: data.modelVersion ?? model,
     //system_fingerprint: "fp_69829325d0",
@@ -678,7 +694,7 @@ function toOpenAiStream (line, controller) {
   }
   const obj = {
     id: data.responseId ?? this.id,
-    choices: data.candidates.map(transformCandidatesDelta),
+    choices: data.candidates.map(transformCandidates.bind(this, "delta")),
     //created: Math.floor(Date.now()/1000),
     model: data.modelVersion ?? this.model,
     //system_fingerprint: "fp_69829325d0",
