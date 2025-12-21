@@ -692,15 +692,24 @@ function toOpenAiStream (line, controller) {
     controller.enqueue(line); // output as is
     return;
   }
-  const obj = {
-    id: data.responseId ?? this.id,
-    choices: data.candidates.map(transformCandidates.bind(this, "delta")),
-    //created: Math.floor(Date.now()/1000),
-    model: data.modelVersion ?? this.model,
-    //system_fingerprint: "fp_69829325d0",
-    object: "chat.completion.chunk",
-    usage: data.usageMetadata && this.streamIncludeUsage ? null : undefined,
-  };
+  let obj;
+  try {
+    obj = {
+      id: data.responseId ?? this.id,
+      choices: data.candidates.map(transformCandidates.bind(this, "delta")),
+      //created: Math.floor(Date.now()/1000),
+      model: data.modelVersion ?? this.model,
+      //system_fingerprint: "fp_69829325d0",
+      object: "chat.completion.chunk",
+      usage: data.usageMetadata && this.streamIncludeUsage ? null : undefined,
+    };
+  } catch (err) {
+    console.error(err);
+    controller.enqueue("Unexpected error while handling request: " + err.message);
+    controller.enqueue("\n\n" + line);
+    controller.terminate();
+    return;
+  }
   if (checkPromptBlock(obj.choices, data.promptFeedback, "delta")) {
     controller.enqueue(sseline(obj));
     return;
